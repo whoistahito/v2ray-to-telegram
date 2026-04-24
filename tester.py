@@ -14,21 +14,25 @@ and returns them sorted by latency.
 
 import json
 import os
-import random
 import socket
 import subprocess
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
+
+import requests
 
 # Path to the xray binary — set via env or default for Docker
 XRAY_BIN = os.environ.get("XRAY_BIN", "/usr/local/bin/xray")
 
 # URL used to measure latency (returns 204, tiny response)
 PING_URL = "http://www.gstatic.com/generate_204"
+
+
+def _compact_dict(data: dict) -> dict:
+    return {key: value for key, value in data.items() if value not in (None, "", [], {})}
 
 # ── URI parser ────────────────────────────────────────────────────────────────
 
@@ -39,12 +43,12 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
+def vless_uri_to_xray_config(uri: str, socks_port: int) -> Optional[dict]:
     """
     Parse a vless:// URI and return an xray-core JSON config dict.
     Returns None if the URI cannot be parsed.
 
-    Supported transports: ws, tcp, grpc, httpupgrade, splithttp
+    Supported transports: ws, tcp, grpc, httpupgrade, xhttp, splithttp
     Supported security:   none, tls, reality
     """
     try:
@@ -54,6 +58,9 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
 
         uuid = parsed.username
         server = parsed.hostname
+        if not uuid or not server:
+            return None
+
         port = parsed.port or 443
         params = parse_qs(parsed.query, keep_blank_values=True)
 
@@ -73,6 +80,7 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
         alpn_raw  = p("alpn")
         alpn      = alpn_raw.split(",") if alpn_raw else ["h2", "http/1.1"]
         service   = p("serviceName", "")  # grpc
+        mode      = p("mode", "")
 
         # ── stream settings ───────────────────────────────────────────────────
         if transport == "ws":
@@ -82,6 +90,7 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
                     "headers": {"Host": host},
                 }
             }
+            network = "ws"
         elif transport == "grpc":
             network_settings = {
                 "grpcSettings": {
@@ -89,15 +98,29 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
                     "multiMode": False,
                 }
             }
-        elif transport in ("httpupgrade", "splithttp"):
+            network = "grpc"
+        elif transport == "httpupgrade":
             network_settings = {
                 "httpupgradeSettings": {
                     "path": path,
                     "host": host,
                 }
             }
-        else:  # tcp / raw
+            network = "httpupgrade"
+        elif transport in ("xhttp", "splithttp"):
+            network_settings = {
+                "xhttpSettings": _compact_dict({
+                    "path": path,
+                    "host": host,
+                    "mode": mode,
+                })
+            }
+            network = "xhttp"
+        elif transport in ("tcp", "raw"):
             network_settings = {}
+            network = "tcp"
+        else:
+            return None
 
         # ── TLS / Reality settings ────────────────────────────────────────────
         if security == "tls":
@@ -123,7 +146,7 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
             tls_settings = {}
 
         stream_settings = {
-            "network": transport if transport not in ("httpupgrade", "splithttp") else "tcp",
+            "network": network,
             "security": security if security in ("tls", "reality") else "none",
             **network_settings,
             **tls_settings,
@@ -166,7 +189,7 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> dict | None:
 
 # ── Single config tester ──────────────────────────────────────────────────────
 
-def _test_one(uri: str, timeout_s: float) -> tuple[str, float | None]:
+def _test_one(uri: str, timeout_s: float) -> tuple[str, Optional[float]]:
     """
     Test a single vless:// URI.
     Returns (uri, latency_ms) or (uri, None) on failure.
@@ -199,18 +222,16 @@ def _test_one(uri: str, timeout_s: float) -> tuple[str, float | None]:
         else:
             return uri, None  # xray never started
 
-        # Build a SOCKS5 proxy handler
-        proxy_handler = urllib.request.ProxyHandler({
-            "http":  f"socks5h://127.0.0.1:{socks_port}",
+        proxies = {
+            "http": f"socks5h://127.0.0.1:{socks_port}",
             "https": f"socks5h://127.0.0.1:{socks_port}",
-        })
-        opener = urllib.request.build_opener(proxy_handler)
+        }
 
         t0 = time.monotonic()
         try:
-            with opener.open(PING_URL, timeout=timeout_s) as resp:
-                resp.read()
-        except Exception:
+            response = requests.get(PING_URL, proxies=proxies, timeout=timeout_s)
+            response.raise_for_status()
+        except requests.RequestException:
             return uri, None
         latency_ms = (time.monotonic() - t0) * 1000
         return uri, latency_ms
