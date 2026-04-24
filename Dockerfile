@@ -29,11 +29,5 @@ RUN pip install --no-cache-dir pyTelegramBotAPI requests
 COPY bot.py tester.py ./
 COPY parsers/ ./parsers/
 
-# ── Runtime config ────────────────────────────────────────────────────────────
-ENV XRAY_BIN=/usr/local/bin/xray \
-    POLL_INTERVAL=3600 \
-    TEST_WORKERS=50 \
-    TEST_TIMEOUT=5.0 \
-    TOP_N=10
 
 CMD ["python", "-u", "bot.py"]

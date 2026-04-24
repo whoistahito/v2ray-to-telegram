@@ -4,15 +4,15 @@ services:
     restart: unless-stopped
 
     environment:
-      # Set all of these in the Coolify GUI under "Environment Variables"
-      - BOT_TOKEN=
-      - CHANNEL_ID=
-      - POLL_INTERVAL=3600
-      - TEST_WORKERS=50
-      - TEST_TIMEOUT=5.0
-      - TOP_N=10
-      - STATE_FILE=data/state.json
-      - XRAY_BIN=/usr/local/bin/xray
+      # Coolify detects variables when they use ${VAR} syntax.
+      BOT_TOKEN: ${BOT_TOKEN}
+      CHANNEL_ID: ${CHANNEL_ID}
+      POLL_INTERVAL: ${POLL_INTERVAL:-3600}
+      TEST_WORKERS: ${TEST_WORKERS:-50}
+      TEST_TIMEOUT: ${TEST_TIMEOUT:-5.0}
+      TOP_N: ${TOP_N:-10}
+      STATE_FILE: ${STATE_FILE:-data/state.json}
+      XRAY_BIN: ${XRAY_BIN:-/usr/local/bin/xray}
 
     volumes:
       - ./data:/app/data
