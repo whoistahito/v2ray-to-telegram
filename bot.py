@@ -1,7 +1,7 @@
 """
 bot.py — V2Ray Config Bot
 
-Polls multiple GitHub repos for vless:// configs, tests them with xray-core,
+Polls the v2go GitHub repo for vless:// configs, tests them with xray-core,
 and sends the top 10 fastest configs to a Telegram channel each cycle.
 """
 
@@ -12,7 +12,7 @@ import time
 
 import telebot
 
-from parsers import goida, matinghanbari, v2go
+from parsers import v2go
 from tester import run_tests
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -126,12 +126,10 @@ def check_and_test() -> None:
 
     all_new_vless: list[str] = []
 
-    # Collect new vless configs from all sources
+    # Collect new vless configs from v2go only
     sources = [
-        ("goida",        goida,        "list_files",        "fetch_configs",       "find_new_configs"),
         ("v2go",         v2go,         "list_files",        "fetch_configs",       "find_new_configs"),
         ("v2go_split",   v2go,         "list_split_files",  "fetch_split_configs", "find_new_split_configs"),
-        ("matinghanbari",matinghanbari,"list_files",        "fetch_configs",       "find_new_configs"),
     ]
 
     for key, parser, list_fn, fetch_fn, diff_fn in sources:
@@ -169,12 +167,12 @@ def cmd_help(message):
     bot.reply_to(
         message,
         "V2Ray Config Bot\n\n"
-        "Fetches vless configs from multiple repos, tests them with xray-core,\n"
+        "Fetches vless configs from v2go, tests them with xray-core,\n"
         "and sends the top 10 fastest to this channel every poll cycle.\n\n"
         "Sources:\n"
-        "  • AvenCores/goida-vpn-configs (~1h)\n"
         "  • Danialsamadi/v2go (~1h)\n"
-        "  • MatinGhanbari/v2ray-configs (~2h)\n\n"
+        "    - Sub*.txt at repo root\n"
+        "    - Splitted-By-Protocol/vless*.txt\n\n"
         "/fetch  — run a cycle now\n"
         "/status — show tracked file counts\n"
         "/top    — show last top 10 (no re-test)",
@@ -192,7 +190,7 @@ def cmd_fetch(message):
 def cmd_status(message):
     state = load_state()
     lines = []
-    for key in ("goida", "v2go", "v2go_split", "matinghanbari"):
+    for key in ("v2go", "v2go_split"):
         val = state.get(key, {})
         if isinstance(val, dict):
             lines.append(f"*{key}*: {len(val)} file(s) tracked")

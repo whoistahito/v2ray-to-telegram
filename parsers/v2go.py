@@ -5,34 +5,41 @@ Updated: every ~1 hour automatically ("Fresh Update")
 
 Two sets of files are tracked:
 
-1. Sub*.txt at repo root  (plain text, # comment headers)
+1. Sub*.txt at repo root  (plain text, # comment headers, vless only)
    list_files() / fetch_configs() / find_new_configs()
 
-2. Splitted-By-Protocol/*.txt  (base64-encoded, one protocol per file)
+2. Splitted-By-Protocol/vless*.txt  (base64-encoded, one protocol per file)
    list_split_files() / fetch_split_configs() / find_new_split_configs()
 """
 
 import base64
 import json
 import urllib.request
+from typing import Any
 
 REPO = "Danialsamadi/v2go"
 GITHUB_API_ROOT = f"https://api.github.com/repos/{REPO}/contents"
 GITHUB_API_SPLIT = f"https://api.github.com/repos/{REPO}/contents/Splitted-By-Protocol"
 
-PROTOCOLS = (
-    "vless://", "vmess://", "ss://", "trojan://",
-    "hy2://", "hysteria2://", "hysteria://", "tuic://",
-)
+VLESS_PREFIX = "vless://"
 
 
-def _github_get(url: str) -> object:
+def _extract_vless(text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith(VLESS_PREFIX)
+    ]
+
+
+def _github_get(url: str) -> list[dict[str, Any]]:
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "v2ray-bot", "Accept": "application/vnd.github+json"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read())
+        data = json.loads(resp.read())
+    return data if isinstance(data, list) else []
 
 
 def _fetch_raw(url: str) -> bytes:
@@ -51,30 +58,22 @@ def _fetch_blob(sha: str) -> bytes:
 
 
 def _extract_plain(raw: bytes) -> list[str]:
-    """Extract configs from plain-text bytes (# lines are comments)."""
+    """Extract vless configs from plain-text bytes (# lines are comments)."""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         text = raw.decode("utf-8", errors="replace")
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and any(line.strip().startswith(p) for p in PROTOCOLS)
-    ]
+    return _extract_vless(text)
 
 
 def _extract_base64(raw: bytes) -> list[str]:
-    """Decode base64 blob then extract configs."""
+    """Decode base64 blob then extract vless configs."""
     try:
         text = base64.b64decode(raw).decode("utf-8")
     except Exception:
         # Fallback: try plain text
         text = raw.decode("utf-8", errors="replace")
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and any(line.strip().startswith(p) for p in PROTOCOLS)
-    ]
+    return _extract_vless(text)
 
 
 # ── Sub*.txt (plain text) ─────────────────────────────────────────────────────
@@ -105,12 +104,15 @@ def find_new_configs(old_sha: str, new_sha: str) -> list[str]:
 # ── Splitted-By-Protocol/*.txt (base64-encoded) ───────────────────────────────
 
 def list_split_files() -> list[dict]:
-    """Return [{name, sha, download_url}] for non-empty protocol files."""
+    """Return [{name, sha, download_url}] for non-empty vless protocol files."""
     entries = _github_get(GITHUB_API_SPLIT)
     return [
         {"name": e["name"], "sha": e["sha"], "download_url": e["download_url"]}
         for e in entries
-        if e["type"] == "file" and e["name"].endswith(".txt") and e.get("size", 0) > 0
+        if e["type"] == "file"
+        and e["name"].lower().endswith(".txt")
+        and "vless" in e["name"].lower()
+        and e.get("size", 0) > 0
     ]
 
 
