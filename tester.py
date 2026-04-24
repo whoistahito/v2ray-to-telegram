@@ -14,6 +14,7 @@ and returns them sorted by latency.
 
 import json
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -33,6 +34,28 @@ PING_URL = "http://www.gstatic.com/generate_204"
 
 def _compact_dict(data: dict) -> dict:
     return {key: value for key, value in data.items() if value not in (None, "", [], {})}
+
+
+def _normalize_path(path: str) -> str:
+    if not path:
+        return "/"
+    return path if path.startswith("/") else f"/{path}"
+
+
+def _parse_bool(value: str, default: bool = False) -> bool:
+    if value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_short_id(sid: str) -> str:
+    sid = sid.strip().lower()
+    if not sid:
+        return ""
+    sid = re.sub(r"[^0-9a-f]", "", sid)
+    if len(sid) % 2 == 1:
+        sid = f"0{sid}"
+    return sid[:16]
 
 # ── URI parser ────────────────────────────────────────────────────────────────
 
@@ -72,22 +95,23 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> Optional[dict]:
         security  = p("security", "none")
         sni       = p("sni") or server
         host      = p("host") or server
-        path      = p("path", "/")
+        path      = _normalize_path(p("path", "/"))
         fp        = p("fp", "chrome")
         pbk       = p("pbk")
-        sid       = p("sid", "")
+        sid       = _normalize_short_id(p("sid", ""))
         flow      = p("flow", "")
         alpn_raw  = p("alpn")
         alpn      = alpn_raw.split(",") if alpn_raw else ["h2", "http/1.1"]
         service   = p("serviceName", "")  # grpc
         mode      = p("mode", "")
+        allow_insecure = _parse_bool(p("allowInsecure", p("insecure", "1")), default=True)
 
         # ── stream settings ───────────────────────────────────────────────────
         if transport == "ws":
             network_settings = {
                 "wsSettings": {
                     "path": path,
-                    "headers": {"Host": host},
+                    "host": host,
                 }
             }
             network = "ws"
@@ -95,7 +119,7 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> Optional[dict]:
             network_settings = {
                 "grpcSettings": {
                     "serviceName": service,
-                    "multiMode": False,
+                    "multiMode": mode.lower() == "multi",
                 }
             }
             network = "grpc"
@@ -127,12 +151,14 @@ def vless_uri_to_xray_config(uri: str, socks_port: int) -> Optional[dict]:
             tls_settings = {
                 "tlsSettings": {
                     "serverName": sni,
-                    "allowInsecure": True,
+                    "allowInsecure": allow_insecure,
                     "fingerprint": fp,
                     "alpn": alpn,
                 }
             }
         elif security == "reality":
+            if not pbk:
+                return None
             tls_settings = {
                 "realitySettings": {
                     "serverName": sni,
