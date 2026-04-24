@@ -1,0 +1,26 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+
+    environment:
+      # Set all of these in the Coolify GUI under "Environment Variables"
+      - BOT_TOKEN
+      - CHANNEL_ID
+      - POLL_INTERVAL=3600
+      - TEST_WORKERS=50
+      - TEST_TIMEOUT=5.0
+      - TOP_N=10
+      - STATE_FILE=data/state.json
+      - XRAY_BIN=/usr/local/bin/xray
+
+    volumes:
+      - ./data:/app/data
+
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    cap_add:
+      - NET_ADMIN

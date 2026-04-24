@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.idea/
+data/
+state.json
+sample_*.txt
+*.zip
+uv.lock
